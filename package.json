@@ -1,0 +1,16 @@
+{
+  "name": "p-chasing",
+  "version": "1.0.0",
+  "main": "index.js",
+  "repository": "git@github.com:royvandewater/p-hacking.git",
+  "author": "Roy van de Water <roy.vwater@gmail.com>",
+  "license": "MIT",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "genstats": "^0.0.1",
+    "obj-array-table": "^1.0.19",
+    "ramda": "^0.27.1"
+  }
+}
