@@ -1,91 +1,40 @@
-const R = require('ramda')
-const genstats = require('genstats')
-const {format: asTable} = require('obj-array-table')
+const { format: asTable } = require('obj-array-table');
+const { map, filter, length, times, drop, includes } = require('ramda');
+const runExperiment = require('./runExperiment');
 
-const totalPopulationSize = 1500
+const numExperiments = 100000;
+const minimumSamples = 1000;
+const maximumSamples = 1100;
+const checkEvery = 20; // samples
+const minimumRuns = 1;
+const desiredP = 0.2
+const liftToEffectiveTreatments = 0.02
 
-const pValue = (control, experiment) => {
-  if (control.runs.length < 2 || experiment.runs.length < 2) return 1;
-  const controlData = R.map(run => run ? 1 : 0, control.runs)
-  const experimentData = R.map(run => run ? 1 : 0, experiment.runs)
+const isType1Error = ({ statsig, knownConversion }) => (statsig && knownConversion === 0)
+const isType2Error = ({ statsig, knownConversion }) => (!statsig && knownConversion > 0)
 
-  return genstats.student(controlData, experimentData).p
-}
+const even = x => x % 2 === 0;
 
-const milestones = [
-  { n: totalPopulationSize / 4, p: 0.2 },
-  { n: totalPopulationSize / 2, p: 0.1 },
-  { n: totalPopulationSize / 1, p: 0.05 },
-]
+const createExperiment = (i) => ({
+  name: `experiment ${i}`,
+  liftToBaseProbability: even(i) ? 0 : liftToEffectiveTreatments,
+})
 
-const main = () => {
-  const control     = {name: 'control',      liftToBaseProbability: 0.0,  runs: [], milestones: [{ n: Infinity, p: 0 }]}
+const formattedPercent = (n) => `${(Math.round(10000 * n) / 100)}%`
 
-  let experiments = [control,
-   {name: 'experiment 1',  liftToBaseProbability: 0.01,  runs: [], milestones: R.clone(milestones)},
-   {name: 'experiment 2',  liftToBaseProbability: 0.02,  runs: [], milestones: R.clone(milestones)},
-   {name: 'experiment 3',  liftToBaseProbability: 0.03,  runs: [], milestones: R.clone(milestones)},
-   {name: 'experiment 4',  liftToBaseProbability: 0.04,  runs: [], milestones: R.clone(milestones)},
-   {name: 'experiment 5',  liftToBaseProbability: 0.05,  runs: [], milestones: R.clone(milestones)},
-   {name: 'experiment 6',  liftToBaseProbability: 0.06,  runs: [], milestones: R.clone(milestones)},
-   {name: 'experiment 7',  liftToBaseProbability: 0.07,  runs: [], milestones: R.clone(milestones)},
-   {name: 'experiment 8',  liftToBaseProbability: 0.10, runs: [], milestones: R.clone(milestones)},
-   {name: 'experiment 9',  liftToBaseProbability: 0.11, runs: [], milestones: R.clone(milestones)},
-   {name: 'experiment 10', liftToBaseProbability: 0.12, runs: [], milestones: R.clone(milestones)},
-  ]
-  const endedExperiments = []
+const main = (argv) => {
+  const verbose = includes('-v', argv)
+  const experiments = times(createExperiment, numExperiments)
 
-  let i = 0;
-  while (experiments.length > 1) {
-    i++;
-    const experiment = experiments[i % experiments.length]
-    const [milestone] = experiment.milestones
-    if (R.isNil(milestone)) {
-      experiments = R.without([experiment], experiments)
-      endedExperiments.push(experiment)
-      continue;
-    }
+  const results = map(runExperiment({ minimumSamples, maximumSamples, desiredP, minimumRuns, checkEvery }), experiments)
 
-    const rand = Math.random() + experiment.liftToBaseProbability
-    const outcome  = rand > 0.5
-    experiment.runs.push(outcome)
+  const type1Errors = filter(isType1Error, results)
+  const type2Errors = filter(isType2Error, results)
 
-    if (experiment.runs.length < milestone.n) continue;
-
-    // We are at the point where we have to evaulate the milestone
-    experiment.milestones = R.tail(experiment.milestones)
-
-    if (pValue(control, experiment) < milestone.p) {
-      // success! let it loop again for the next milestone
-      continue;
-    }
-
-    // failure :-(. Let's call this one done
-    endedExperiments.push(experiment)
-    experiments = R.without([experiment], experiments)
+  if (verbose) {
+    console.log(asTable(results))
   }
-
-  let results = []
-
-  endedExperiments.forEach((experiment) => {
-    const {name, liftToBaseProbability, runs} = experiment
-    const successes = R.filter(R.identity, runs)
-    const p = pValue(control, experiment)
-
-    results.push({
-      name,
-      knownLift: liftToBaseProbability,
-      liftToBaseProbability,
-      conversionRate: (successes.length / runs.length).toFixed(3),
-      p: (Math.ceil(p * 1000) / 1000).toFixed(3),
-      statsig: p < 0.05,
-    })
-  })
-
-  results = R.sortBy(R.prop('liftToBaseProbability'), results)
-  results = R.map(R.omit(['liftToBaseProbability']), results)
-
-  console.log(asTable(results))
-  console.log(`\nAchieved in ${i} runs`)
+  console.log('Number of Type I errors:', length(type1Errors), formattedPercent(length(type1Errors) / length(results)))
+  console.log('Number of Type II errors:', length(type2Errors), formattedPercent(length(type2Errors) / length(results)))
 }
-main();
+main(process.argv);
